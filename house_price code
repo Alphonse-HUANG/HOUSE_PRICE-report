@@ -1,0 +1,506 @@
+import pandas as pd
+import numpy as np
+import warnings
+warnings.filterwarnings("ignore")
+import seaborn as sns
+import matplotlib.pyplot as plt
+%matplotlib inline
+from sklearn.impute import *
+from sklearn.ensemble import *
+
+#import data
+Train = pd.read_csv("D:/KAGGLE/HOUSE_PRICE DATA SET/train.csv")
+Test = pd.read_csv("D:/KAGGLE/HOUSE_PRICE DATA SET/test.csv")
+
+#step1:Data cleaning
+X=pd.concat([Train,Test],axis=0)  #concat data to make the data_clean easier
+
+#watch the null in each column
+X1=pd.DataFrame(X.isnull().sum()[X.isnull().any()],columns=["values"])
+X2=pd.DataFrame(X[X1.index].dtypes,columns=["types"])
+lost_values2=pd.concat([X1,X2],axis=1).sort_values(by="values",ascending=False)
+
+#fill the null data
+type_2=["PoolQC","BsmtQual", "BsmtCond", "FireplaceQu", "GarageFinish","GarageQual","BsmtExposure", 
+        "Electrical", "MSZoning", "Exterior1st", "Exterior2nd", "KitchenQual","SaleType"]
+type_3=['Alley','MasVnrType','GarageType','GarageCond','Fence','Street','LotShape','LandContour','BsmtFinType1',
+       'BsmtFinType2','CentralAir','MiscFeature','Utilities',"Functional"]
+
+def fill_missings(res):
+    for type2 in type_2:
+        res[type2] = res[type2].fillna(res[type2].mode()[0])
+    for type3 in type_3:
+        res[type3] = res[type3].fillna("missing")
+    
+    flist = ['LotFrontage','LotArea','MasVnrArea','BsmtFinSF1','BsmtFinSF2','BsmtUnfSF',
+             'TotalBsmtSF','1stFlrSF','2ndFlrSF','LowQualFinSF','GrLivArea', 'BsmtFullBath',
+             'BsmtHalfBath','FullBath','HalfBath','BedroomAbvGr', 'KitchenAbvGr',
+              'TotRmsAbvGrd', 'Fireplaces','GarageCars','GarageArea', 'WoodDeckSF',
+             'OpenPorchSF', 'EnclosedPorch','3SsnPorch','ScreenPorch','PoolArea','MiscVal']
+             
+    for fl in flist:
+        res[fl] = res[fl].fillna(0)
+    #using 0 to replace   
+    res['TotalBsmtSF'] = res['TotalBsmtSF'].apply(lambda x: np.exp(6) if x <= 0.0 else x)
+    res['2ndFlrSF'] = res['2ndFlrSF'].apply(lambda x: np.exp(6.5) if x <= 0.0 else x)
+    res['GarageArea'] = res['GarageArea'].apply(lambda x: np.exp(6) if x <= 0.0 else x)
+    res['GarageCars'] = res['GarageCars'].apply(lambda x: 0 if x <= 0.0 else x)
+    res['LotFrontage'] = res['LotFrontage'].apply(lambda x: np.exp(4.2) if x <= 0.0 else x)
+    res['MasVnrArea'] = res['MasVnrArea'].apply(lambda x: np.exp(4) if x <= 0.0 else x)
+    res['BsmtFinSF1'] = res['BsmtFinSF1'].apply(lambda x: np.exp(6.5) if x <= 0.0 else x)    
+    
+    return res
+
+# clean outliers
+  # export different types of data(column)
+num=[]
+obj=[]
+for column in X.columns:
+    if X[column].dtypes != "object":
+        num.append(column)
+    if X[column].dtypes == "object":
+        obj.append(column)
+
+Data1=X[X.SalePrice <= X["SalePrice"].mean()+5*X["SalePrice"].std()]  #deal with the target 
+
+Data2=X[X.SalePrice.isnull()==True]
+Data3=pd.concat([Data1,Data2],axis=0)
+
+#showing the realation between each feature and the target(saleprice)
+for column in num:
+    figure=plt.figure()
+    sns.pairplot(x_vars=[column],y_vars=['SalePrice'],data=Data1,dropna=True)
+plt.show()
+
+#deal with outliers refer to the last pictures
+del_={'1stFlrSF':1,'2ndFlrSF':2,'3SsnPorch':2,'Alley':0,'BedroomAbvGr':1,
+ 'BldgType':0,'BsmtCond':0,'BsmtExposure':0,'BsmtFinSF1':1,'BsmtFinSF2':1,'LotArea':4,
+ 'LotConfig':0,'LotFrontage':2,'MasVnrArea':1,'MiscVal':3,'TotalBsmtSF':1}
+
+ for key,value in del_.items():
+        Data1=Data1.sort_values(key,ascending=False)[value:]
+
+Data=pd.concat([Data1,Data2],axis=0) #build the new dataset
+
+#And next step is feature engineering
+
+#add new features
+Data["TotalFlrSF"] = Data["1stFlrSF"]+Data["2ndFlrSF"]
+Data["TotalPorch"] = Data["3SsnPorch"]+Data["EnclosedPorch"]+Data["OpenPorchSF"]+Data["ScreenPorch"]
+Data["TotalBath"] = Data["HalfBath"]+Data["FullBath"]
+Data['YearsSinceRemodel'] = Data['YrSold'].astype(int) - Data['YearRemodAdd'].astype(int)
+
+#Sequential feature coding
+from sklearn.preprocessing import *
+
+#["ExterQual","ExterCond","HeatingQC","KitchenQual","FireplaceQu","GarageQual","GarageCond","PoolQC"]
+def QualToInt(data):
+    if (data == "Ex"):
+        score=5
+    elif (data == "Gd"):
+        score=4
+    elif (data == "TA"):
+        score=3
+    elif (data == "Fa"):
+        score=2
+    elif (data == "Po"):
+        score=1
+    else:
+        score=0
+    return score
+
+List=["ExterQual","ExterCond","HeatingQC","KitchenQual","FireplaceQu","GarageQual","GarageCond","PoolQC"]
+for column in List:
+    Data[column]=Data[column].apply(QualToInt)
+
+ #["BsmtExposure"]
+ def BsmtQualToInt(data):
+        if (data == "Gd"):
+        score=4
+    elif (data == "Av"):
+        score=3
+    elif (data == "Mn"):
+        score=2
+    elif (data == "No"):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["BsmtExposure"]=Data["BsmtExposure"].apply(BsmtQualToInt)
+
+#["BsmtFinType1"]
+def BsmtTypeToInt(data):
+    if (data == 'GLQ'):
+        score=6
+    elif (data == 'ALQ'):
+        score=5
+    elif (data == "BLQ"):
+        score=4
+    elif (data == "Rec"):
+        score=3
+    elif (data == "LwQ"):
+        score=2
+    elif (data == "Unf"):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["BsmtFinType1"]=Data["BsmtFinType1"].apply(BsmtTypeToInt)
+Data["BsmtFinType2"]=Data["BsmtFinType2"].apply(BsmtTypeToInt)
+
+# ["CentralAir"]
+def CentralAirTypeToInt(data):
+    if (data == 'Y'):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["CentralAir"]=Data["CentralAir"].apply(CentralAirTypeToInt)
+
+#["GarageFinish"]
+def GarageFinishTypeToInt(data):
+    if (data == 'Fin'):
+        score=3
+    elif (data == "RFn"):
+        score=2
+    elif (data == "Unf"):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["GarageFinish"]=Data["GarageFinish"].apply(GarageFinishTypeToInt)
+
+#["Fence"]
+def FenceToInt(data):
+    if (data == 'GdPrv'):
+        score=4
+    elif (data == "MnPrv"):
+        score=2
+    elif (data == "GdWo"):
+        score=2
+    elif (data == "MnWw"):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["Fence"]=Data["Fence"].apply(FenceToInt)
+
+#["SaleCondition"]
+def SaleConToInt(data):
+    if (data == 'Normal'):
+        score=6
+    elif (data == 'Abnormal'):
+        score=5
+    elif (data == "AdjLand"):
+        score=4
+    elif (data == "Alloca"):
+        score=3
+    elif (data == "Family"):
+        score=2
+    elif (data == "Partial"):
+        score=1
+    else:
+        score=0
+    return score
+
+Data["SaleCondition"]=Data["SaleCondition"].apply(SaleConToInt)
+
+#logarithmic
+Data_=Data.drop(["SalePrice"],axis=1)
+Quantitative = [f for f in Data_.columns if Data_.dtypes[f] != 'object'and Data_.dtypes[f] != 'str']
+
+from scipy.stats import norm, skew #for some statistics
+skewed_feats = Data_[Quantitative].apply(lambda x: skew(x.dropna())).sort_values(ascending=False)
+skewness = pd.DataFrame({'Skew' :skewed_feats})
+skewness    #see all the skewness of each feature, and if the skewness >0.15, choose it to logarithmic
+
+def addlogs(res, ls):
+    m = res.shape[1]
+    for l in ls:
+        res = res.assign(newcol=pd.Series(np.log(1.01+res[l])).values)   
+        res.columns.values[m] = l + '_log'
+        m += 1
+    return res
+loglist=skewness[abs(skewness)>0.15].index.tolist()
+Data_ = addlogs(Data_, loglist)
+
+#standardization
+for column in Data_.columns:
+    if Data_[column].dtypes != "object":
+        Data_[column] = (Data_[column]-Data_[column].mean())/Data_[column].std()
+    else:
+        Data_[column]=Data_[column]
+
+Data_["YearsSinceRemodel_log"]=Data_["YearsSinceRemodel_log"].fillna(0) 
+#I found that after logarithmic, a data of YearsSinceRemodel_log turn to 0, 
+# so set it to 0 after standardization,or it will be nan
+
+# ONE-HOT
+Data_pre=pd.get_dummies(Data_,columns=Data_.select_dtypes(include=["object"]).columns)
+
+#PCA
+from sklearn.decomposition import PCA
+Data_pre1=Data_pre.copy()
+
+pca = PCA(n_components=0.975,svd_solver="full")  #new features will contain 97.5% information of the formal
+pca = pca.fit(Data_pre1)
+x = pca.transform(Data_pre1)
+
+#rename features from "feature1" to "feature83"
+List=["Feature"]
+a="Feature"
+for i in range(x.shape[1]):
+    a="Feature"+str(i)
+    List.append(a)
+List.pop(0)
+
+Data_=pd.DataFrame(x,columns=[List])
+
+X=Data_
+y=Data["SalePrice"]
+
+#splite data
+from sklearn.model_selection import *
+
+X_1=X[target.isnull().values == False]
+X_2=X[target.isnull().values == True]
+
+Xtrain,Xtest,Ytrain,Ytest = train_test_split(X_1,y,test_size=0.15,random_state=666)
+
+for i in [Xtrain,Xtest]:
+    i.index = range(i.shape[0]) #realign its index
+
+#model building
+#first, find the best parameter of each model
+
+#definite an evaluation index: root mean squared error
+def rmse(x,y):
+    mse = mean_squared_error(x,y)
+    return mse**0.5  
+
+#Linear Regression
+from sklearn.linear_model import *
+from sklearn.model_selection import *
+from sklearn.metrics import mean_squared_error,r2_score
+
+reg = LinearRegression().fit(Xtrain,Ytrain)
+yhat=reg.predict(Xtest)
+rmse(Ytest,yhat)          
+reg.score(Xtest,Ytest)
+
+#Lasso
+alp = np.logspace(-10,0,200,base=10)
+
+lasso_ = LassoCV(alphas=alp,cv=5).fit(Xtrain,Ytrain)
+lasso_.alpha_                                         #look for the best alpha
+
+yhat = lasso_.predict(Xtest)
+lasso_.score(Xtest,Ytest)
+rmse(yhat,Ytes) 
+
+#ElasticNet
+alp = np.logspace(-10,100,10,base=10)
+enet_ = ElasticNetCV(alphas=alp,cv=5).fit(Xtrain,Ytrain)
+enet_.alpha_      #look for the best alpha
+
+enet=ElasticNetCV(eps=0.00001
+           ,n_alphas=1000
+           ,cv=5).fit(Xtrain,Ytrain)
+
+yhat = enet_.predict(Xtest)
+rmse(yhat,Ytes)
+enet_.score(Xtest,Ytest)
+
+#RandomForestClassifier
+rfc=RandomForestClassifier(random_state=666)
+rfc=rfc.fit(Xtrain,Ytrain)
+
+rfc.score(Xtest,Ytest) 
+  #I suggest that we should drop this way, the reason is that we use the one-hot code
+
+#XGboost
+from xgboost import XGBRegressor as XGBR
+
+  #look for the best n_estimators 
+n_estimators=range(1,500,50)
+score=[]
+for i in n_estimators:
+    xg = XGBR(n_estimators=i).fit(Xtrain,Ytrain)
+    score.append(xg.score(Xtest,Ytest))
+
+n_estimators[score.index(max(score))]
+
+xg = XGBR(n_estimators=350).fit(Xtrain,Ytrain)
+yhat = xg.predict(Xtest)
+rmse(yhat,Ytes)
+
+#RandomForestRegressor
+from sklearn.ensemble import *
+
+  #look for the best n_estimators
+n_estimators=range(1,500,50)
+score=[]
+
+for i in n_estimators:
+    regressor = RandomForestRegressor(n_estimators=i).fit(Xtrain,Ytrain)
+    score.append(regressor.score(Xtest,Ytest))
+
+n_estimators[score.index(max(score))]
+
+regressor = RandomForestRegressor(n_estimators=400)
+regressor = RandomForestRegressor(n_estimators=400).fit(Xtrain,Ytrain)
+
+yhat = regressor.predict(Xtest)
+rmse(Ytest,yhat)
+regressor.score(Xtest,Ytest)
+
+#AdaBoostRegressor
+  #look for the parameters index-"loss"
+loss=["linear","square","exponential"]
+learning_rate=np.logspace(-10,0,200,base=10)
+n_est=range(1,500,50)
+
+score=[]
+for i in loss:
+    ada = AdaBoostRegressor(n_estimators=50,learning_rate=1.0,loss=i)
+    ada = ada.fit(Xtrain,Ytrain)
+    score.append(ada.score(Xtest,Ytest))
+
+loss[score.index(max(score))]
+
+  #look for the parameters index-"learning_rate"
+score=[]
+for i in learning_rate:
+    ada = AdaBoostRegressor(n_estimators=50,learning_rate=i,loss="linear")
+    ada = ada.fit(Xtrain,Ytrain)
+    score.append(ada.score(Xtest,Ytest))
+
+learning_rate[score.index(max(score))]
+
+#look for the best parameters-"n_estimators"
+score=[]
+for i in n_est:
+    ada = AdaBoostRegressor(#n_estimators=i,learning_rate=0.24945081352303167,loss="linear")
+    ada = ada.fit(Xtrain,Ytrain)
+    score.append(ada.score(Xtest,Ytest))
+
+n_est[score.index(max(score))]
+
+ada_ = AdaBoostRegressor(n_estimators=300,learning_rate=0.7934096665797492,loss="square")
+ada_ = ada_.fit(Xtrain,Ytrain)
+yhat = ada_.predict(Xtest)
+
+ada_.score(Xtest,Ytest)
+rmse(Ytest,yhat)
+
+#BayesianRidge
+bayes = BayesianRidge()
+bayes = bayes.fit(Xtrain,Ytrain)
+yhat=bayes.predict(Xtest)
+
+bayes.score(Xtest,Ytest)
+rmse(Ytest,yhat)
+
+#GradientBoostingRegressor
+
+#look for the best parameters-"loss" and "n_estimators"   
+loss=['ls', 'lad', 'huber', 'quantile']
+n_estimators=range(1,500,50)
+
+score=[]
+for i in loss:
+    gb = GradientBoostingRegressor(loss=i)
+    gb = gb.fit(Xtrain,Ytrain)
+    score.append(gb.score(Xtest,Ytest))
+
+loss[score.index(max(score))]
+
+score=[]
+for i in n_estimators:
+    gb = GradientBoostingRegressor(loss="huber",n_estimators=i)
+    gb = gb.fit(Xtrain,Ytrain)
+    score.append(gb.score(Xtest,Ytest))
+
+n_estimators[score.index(max(score))]
+
+gb = GradientBoostingRegressor(loss="huber",n_estimators=350)
+gb = gb.fit(Xtrain,Ytrain)
+yhat = gb.predict(Xtest)
+
+gb.score(Xtest,Ytest)
+rmse(Ytest,yhat)
+
+#MLPRegressor
+from sklearn.neural_network import *
+
+# hidden_layer_sizes=[(100,),(50,),(25,),(10,)]
+alpha=[0.0001,0.0002,0.01,0.02,0.1,0.2]
+early_stopping=[False,True]
+learning_rate_init=[0.001,0.0005,0.005,0.01,0.1]
+learning_rate = ['constant', 'invscaling', 'adaptive']
+
+for i1 in learning_rate:
+    mlpr = MLPRegressor(learning_rate=i1)
+    mlpr = mlpr.fit(Xtrain,Ytrain)
+    score_1.append(gb.score(Xtest,Ytest))
+
+#and here I replace many parameters, its rmse and score do not change
+
+#And finally, we have test 11 models, and choose their best score of parameters
+
+'''
+LinearRegression 
+Lasso                 lasso_.alpha_ = 1.0
+ElasticNet            enet_.alpha_ = 1e-10
+RandomForestRegressor
+AdaBoostRegressor       n_estimators=50,learning_rate=0.560716993820547,loss="linear"
+BayesianRidge
+GradientBoostingRegressor    loss="huber",n_estimators=350
+MLPRegressor
+XGBR                 (n_estimators=350)
+
+and we finally choose 9 models
+
+'''
+
+#stacking
+
+rgc = LinearRegression()
+la  = Lasso(alpha = 1.0)
+ela = ElasticNet(alpha = 1e-10)
+rfr = RandomForestRegressor(n_estimators=400)
+ada = AdaBoostRegressor(n_estimators=50,learning_rate=0.560716993820547,loss="linear")
+bay = BayesianRidge()
+gbr = GradientBoostingRegressor(loss="huber",n_estimators=350)
+mlpr = MLPRegressor()
+xg = XGBR(n_estimators=350)
+
+model=[rgc,la,ela,rfr,ada,bay,gbr,mlpr,xg]
+
+'''
+Above all of the models, I will use stacking to combine these models, and the first floor is LinearRegression, Lasso, 
+ElasticNet,  RandomForestRegressor, AdaboostRegressor, BayesianRidge and GrandientBoostingRegressor, 
+MLPRegressor; the second floor is XGboost MLPRegressor.
+'''
+
+from mlxtend.regressor import StackingCVRegressor
+
+stacked = StackingCVRegressor(regressors=(rgc,la,ela,rfr,ada,bay,mlpr,gbr)
+                             ,meta_regressor=xg
+                             ,use_features_in_secondary=True)
+
+stacked = stacked.fit(Xtrain,Ytrain) 
+yhat = stacked.predict(Xtest)
+
+score = stacked.score(Xtest,Ytest)
+print(rmse(Ytest,yhat), score)
+
+X_2_features = X_2.drop("SalePrice",axis=1)
+YHAT = stacked.predict(X_2_features)  #YHAT the final prediction
+
+pd.DataFrame(YHAT).to_csv("D:/KAGGLE/HOUSE_PRICE DATA SET/prediction.csv") #export the final prediction
